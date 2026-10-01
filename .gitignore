@@ -1,0 +1,25 @@
+# Visual Studio / .NET
+.vs/
+bin/
+obj/
+*.user
+*.suo
+
+# React / Node
+node_modules/
+dist/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# ASP.NET secrets / local settings
+appsettings.Development.json
+
+# IDE
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
