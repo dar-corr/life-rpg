@@ -1,5 +1,6 @@
 using LifeRPG.Api.Data;
 using LifeRPG.Api.Models;
+using LifeRPG.Api.Contracts.Characters;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -26,7 +27,7 @@ builder.Services
     {
         options.User.RequireUniqueEmail = true;
 
-        // Наши правила пароля для MVP
+        // правила пароля для MVP
         options.Password.RequiredLength = 8;
         options.Password.RequireDigit = true;
         options.Password.RequireLowercase = true;
@@ -36,8 +37,6 @@ builder.Services
     .AddEntityFrameworkStores<ApplicationDbContext>()
     .AddDefaultTokenProviders();
 
-// Для API не хотим получать HTML-редирект на страницу Login.
-// Хотим нормальные HTTP 401 / 403.
 
 builder.Services.ConfigureApplicationCookie(options =>
 {
@@ -144,18 +143,12 @@ app.MapPost(
         ApplicationUser? user;
 
         if (request.Login.Contains('@'))
-        {
             user = await userManager.FindByEmailAsync(request.Login);
-        }
         else
-        {
             user = await userManager.FindByNameAsync(request.Login);
-        }
 
         if (user is null)
-        {
             return Results.Unauthorized();
-        }
 
         var result =
             await signInManager.PasswordSignInAsync(
@@ -166,9 +159,7 @@ app.MapPost(
             );
 
         if (!result.Succeeded)
-        {
             return Results.Unauthorized();
-        }
 
         return Results.Ok(new
         {
@@ -190,9 +181,7 @@ app.MapGet(
             await userManager.GetUserAsync(context.User);
 
         if (user is null)
-        {
             return Results.Unauthorized();
-        }
 
         return Results.Ok(new
         {
@@ -216,6 +205,89 @@ app.MapPost(
         return Results.NoContent();
     }
 )
+.RequireAuthorization();
+
+
+app.MapPost("/api/characters", async (
+    CreateCharacterRequest request,
+    HttpContext context,
+    UserManager<ApplicationUser> userManager,
+    ApplicationDbContext db) =>
+{
+    var user = await userManager.GetUserAsync(context.User);
+
+    if (user is null)
+        return Results.Unauthorized();
+
+    var name = request.Name?.Trim();
+
+    if (string.IsNullOrWhiteSpace(name) || name.Length > 100)
+        return Results.BadRequest(new
+        {
+            message = "Имя должно содержать от 1 до 100 символов."
+        });
+
+    var exists = await db.Characters
+        .AnyAsync(c => c.UserId == user.Id);
+
+    if (exists)
+        return Results.Conflict(new
+        {
+            message = "Персонаж уже существует."
+        });
+
+    var character = new Character
+    {
+        UserId = user.Id,
+        Name = name
+    };
+
+    db.Characters.Add(character);
+    await db.SaveChangesAsync();
+
+    return Results.Created("/api/characters/me", new
+    {
+        character.Id,
+        character.Name,
+        character.Level,
+        character.TotalXp,
+        character.CreatedAt
+    });
+})
+.RequireAuthorization();
+
+
+app.MapGet("/api/characters/me", async (
+    HttpContext context,
+    UserManager<ApplicationUser> userManager,
+    ApplicationDbContext db) =>
+{
+    var user = await userManager.GetUserAsync(context.User);
+
+    if (user is null)
+        return Results.Unauthorized();
+
+    var character = await db.Characters
+        .AsNoTracking()
+        .Where(c => c.UserId == user.Id)
+        .Select(c => new
+        {
+            c.Id,
+            c.Name,
+            c.Level,
+            c.TotalXp,
+            c.CreatedAt
+        })
+        .FirstOrDefaultAsync();
+
+    if (character is null)
+        return Results.NotFound(new
+        {
+            message = "Персонаж не найден."
+        });
+
+    return Results.Ok(character);
+})
 .RequireAuthorization();
 
 app.Run();
