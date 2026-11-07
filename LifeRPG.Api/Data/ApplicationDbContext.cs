@@ -12,4 +12,25 @@ public class ApplicationDbContext
         : base(options)
     {
     }
+
+    public DbSet<Character> Characters => Set<Character>();
+
+    protected override void OnModelCreating(ModelBuilder builder)
+    {
+        base.OnModelCreating(builder);
+
+        builder.Entity<Character>(entity =>
+        {
+            entity.Property(c => c.Name)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.HasIndex(c => c.UserId)
+                .IsUnique();
+
+            entity.HasOne(c => c.User)
+                .WithOne()
+                .HasForeignKey<Character>(c => c.UserId);
+        });
+    }
 }
