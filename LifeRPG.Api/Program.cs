@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
 using LifeRPG.Api.Contracts.Auth;
+using LifeRPG.Api.Contracts.Quests;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -289,5 +290,177 @@ app.MapGet("/api/characters/me", async (
     return Results.Ok(character);
 })
 .RequireAuthorization();
+
+
+app.MapPost("/api/quests", async (
+    CreateQuestRequest request,
+    HttpContext context,
+    UserManager<ApplicationUser> userManager,
+    ApplicationDbContext db) =>
+{
+    var user = await userManager.GetUserAsync(context.User);
+
+    if (user is null)
+        return Results.Unauthorized();
+
+    var character = await db.Characters
+        .FirstOrDefaultAsync(c => c.UserId == user.Id);
+
+    if (character is null)
+        return Results.NotFound(new
+        {
+            message = "Сначала создайте персонажа."
+        });
+
+    var title = request.Title?.Trim();
+    var description = request.Description?.Trim();
+
+    if (string.IsNullOrWhiteSpace(title) || title.Length > 150)
+        return Results.BadRequest(new
+        {
+            message = "Название должно содержать от 1 до 150 символов."
+        });
+
+    if (description?.Length > 4000)
+        return Results.BadRequest(new
+        {
+            message = "Описание слишком длинное."
+        });
+
+    var quest = new Quest
+    {
+        CharacterId = character.Id,
+        Title = title,
+        Description = string.IsNullOrEmpty(description)
+            ? null
+            : description,
+        Deadline = request.Deadline
+    };
+
+    db.Quests.Add(quest);
+    await db.SaveChangesAsync();
+
+    return Results.Created($"/api/quests/{quest.Id}", new
+    {
+        quest.Id,
+        quest.Title,
+        quest.Description,
+        quest.Status,
+        quest.AcceptedAt,
+        quest.Deadline
+    });
+})
+.RequireAuthorization();
+
+
+
+app.MapGet("/api/quests", async (
+    HttpContext context,
+    UserManager<ApplicationUser> userManager,
+    ApplicationDbContext db) =>
+{
+    var user = await userManager.GetUserAsync(context.User);
+
+    if (user is null)
+        return Results.Unauthorized();
+
+    var quests = await db.Quests
+        .AsNoTracking()
+        .Where(q => q.Character.UserId == user.Id)
+        .OrderByDescending(q => q.AcceptedAt)
+        .Select(q => new
+        {
+            q.Id,
+            q.Title,
+            q.Description,
+            q.Status,
+            q.AcceptedAt,
+            q.Deadline,
+            q.CompletedAt
+        })
+        .ToListAsync();
+
+    return Results.Ok(quests);
+})
+.RequireAuthorization();
+
+
+
+app.MapGet("/api/quests/{id:int}", async (
+    int id,
+    HttpContext context,
+    UserManager<ApplicationUser> userManager,
+    ApplicationDbContext db) =>
+{
+    var user = await userManager.GetUserAsync(context.User);
+
+    if (user is null)
+        return Results.Unauthorized();
+
+    var quest = await db.Quests
+        .AsNoTracking()
+        .Where(q => q.Id == id &&
+                    q.Character.UserId == user.Id)
+        .Select(q => new
+        {
+            q.Id,
+            q.Title,
+            q.Description,
+            q.Status,
+            q.AcceptedAt,
+            q.Deadline,
+            q.CompletedAt
+        })
+        .FirstOrDefaultAsync();
+
+    if (quest is null)
+        return Results.NotFound();
+
+    return Results.Ok(quest);
+})
+.RequireAuthorization();
+
+
+
+app.MapPost("/api/quests/{id:int}/complete", async (
+    int id,
+    HttpContext context,
+    UserManager<ApplicationUser> userManager,
+    ApplicationDbContext db) =>
+{
+    var user = await userManager.GetUserAsync(context.User);
+
+    if (user is null)
+        return Results.Unauthorized();
+
+    var quest = await db.Quests
+        .FirstOrDefaultAsync(q =>
+            q.Id == id &&
+            q.Character.UserId == user.Id);
+
+    if (quest is null)
+        return Results.NotFound();
+
+    if (quest.Status != "Active")
+        return Results.Conflict(new
+        {
+            message = "Квест уже завершён."
+        });
+
+    quest.Status = "Completed";
+    quest.CompletedAt = DateTime.UtcNow;
+
+    await db.SaveChangesAsync();
+
+    return Results.Ok(new
+    {
+        quest.Id,
+        quest.Title,
+        quest.Status,
+        quest.CompletedAt
+    });
+})
+.RequireAuthorization();
+
 
 app.Run();
